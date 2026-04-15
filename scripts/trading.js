@@ -1,236 +1,236 @@
-export function receiveTrade(tradeData) {
-    let d = new Dialog({
-        title: "Incoming Trade Request",
-        content: `<p>${tradeData.currentActor.name} is sending you ${offer(tradeData)}. Do you accept?</p>`,
-        buttons: {
-            one: {
-                icon: '<i class="fas fa-check"></i>',
-                label: "Confirm",
+// -- Incoming trade request (shown to the recipient PC) -----------------
+
+export function receiveTrade(tradeData)
+{
+    const dialog = new foundry.applications.api.DialogV2({
+        window: { title: 'Incoming Trade Request' },
+        content: `<p>${tradeData.currentActor.name} wants to give you ${offerDescription(tradeData)}. Do you accept?</p>`,
+        buttons: [
+            {
+                action: 'accept',
+                label: 'Accept',
+                icon: 'fas fa-check',
+                default: true,
                 callback: () => tradeConfirmed(tradeData)
             },
-            two: {
-                icon: '<i class="fas fa-times"></i>',
-                label: "Deny",
+            {
+                action: 'deny',
+                label: 'Deny',
+                icon: 'fas fa-times',
                 callback: () => tradeDenied(tradeData)
             }
-        },
-        default: "two",
+        ],
+        rejectClose: false
     });
-    if (game.user.isGM === false) {
-        d.render(true);
+
+    // Only show the dialog to the actual player, never to the GM automatically.
+    if (!game.user.isGM)
+    {
+        dialog.render(true);
     }
 }
 
-export function completeTrade(tradeData) {
-    if (!!tradeData.currentItem) {
-        giveItem(tradeData);
-    } else {
-        giveCurrency(tradeData);
+// -- Called on the sender's client when the recipient accepted -----------
+
+export function completeTrade(tradeData)
+{
+    if (tradeData.currentItem)
+    {
+        removeSenderItem(tradeData);
+    } else
+    {
+        removeSenderCurrency(tradeData);
     }
-    ui.notifications.notify(`${tradeData.currentActor.name} accepted your trade request.`);
+    ui.notifications.info(`${tradeData.currentActor.name} accepted your trade.`);
 }
 
-export function denyTrade(tradeData) {
-    ui.notifications.notify(`${tradeData.currentActor.name} rejected your trade request.`);
+export function denyTrade(tradeData)
+{
+    ui.notifications.warn(`${tradeData.currentActor.name} declined your trade.`);
 }
 
-function giveItem({currentItem, quantity, actor}) {
-    currentItem = actor.items.get(currentItem._id);
-    let updatedQuantity, updateItem;
-    if (isNaN(currentItem.system.quantity)) {
-        updatedQuantity = currentItem.system.quantity.value - quantity;
-        updateItem = {
-            "system.quantity.value": updatedQuantity
-        }
-    } else {
-        updatedQuantity = currentItem.system.quantity - quantity;
-        updateItem = {
-            "system.quantity": updatedQuantity
-        }
-    }
-    currentItem.update(updateItem).then(res => {
-        if ((isNaN(currentItem.system.quantity) && currentItem.system.quantity.value === 0) ||
-            currentItem.system.quantity === 0) {
-            currentItem.delete();
-        }
-    });
-}
+// -- NPC trade -- executed entirely on the GM's client ------------------
 
-function giveCurrency({quantity, actor, alt}) {
-    if (game.system.id === "wfrp4e") {
-        const currentCurrency = actor.items.filter(item => item.type === "money");
-        const currentGC = currentCurrency.find(currency => currency.name === "Gold Crown");
-        const currentSS = currentCurrency.find(currency => currency.name === "Silver Shilling");
-        const currentBP = currentCurrency.find(currency => currency.name === "Brass Penny");
-        const updateGC = {
-            "data.quantity.value": currentGC.system.quantity.value - quantity.gc
-        };
-        currentGC.update(updateGC);
-        const updateSS = {
-            "data.quantity.value": currentSS.system.quantity.value - quantity.ss
-        };
-        currentSS.update(updateSS);
-        const updateBP = {
-            "data.quantity.value": currentBP.system.quantity.value - quantity.bp
-        };
-        currentBP.update(updateBP);
-    } else if (game.system.id === "pf2e") {
-        actor.inventory.removeCoins(quantity);
-    } else {
-        let currentCurrency = actor.system.currency;
-        let updateTargetGold = {};
-        if (alt) {
-            currentCurrency = actor.system.altCurrency;
-            updateTargetGold = {
-                "data.altCurrency.pp": currentCurrency.pp - quantity.pp,
-                "data.altCurrency.gp": currentCurrency.gp - quantity.gp,
-                "data.altCurrency.sp": currentCurrency.sp - quantity.sp,
-                "data.altCurrency.cp": currentCurrency.cp - quantity.cp,
-            };
-        } else {
-            updateTargetGold = {
-                "data.currency.pp": currentCurrency.pp - quantity.pp,
-                "data.currency.gp": currentCurrency.gp - quantity.gp,
-                "data.currency.sp": currentCurrency.sp - quantity.sp,
-                "data.currency.cp": currentCurrency.cp - quantity.cp,
-            };
-        }
+export async function completeNPCTrade({ currentItem, quantity, actor, currentActor })
+{
+    // actor        = NPC receiving the item/currency
+    // currentActor = PC sending the item/currency
 
-        if (quantity.ep) {
-            if (alt) {
-                updateTargetGold["data.altCurrency.ep"] = currentCurrency.ep - quantity.ep;
-            } else {
-                updateTargetGold["data.currency.ep"] = currentCurrency.ep - quantity.ep;
+    if (currentItem)
+    {
+        // Remove from sender
+        const senderItem = currentActor.items.get(currentItem._id);
+        if (senderItem)
+        {
+            const newQty = (senderItem.system.quantity ?? 0) - quantity;
+            if (newQty <= 0)
+            {
+                await senderItem.delete();
+            } else
+            {
+                await senderItem.update({ 'system.quantity': newQty });
             }
         }
-        actor.update(updateTargetGold);
+        // Add to NPC
+        const itemData = foundry.utils.duplicate(currentItem);
+        itemData.system.quantity = quantity;
+        await Item.create(itemData, { parent: actor });
+    } else
+    {
+        // Currency -- remove from sender, add to NPC
+        await transferCurrencyFrom(currentActor, quantity);
+        await transferCurrencyTo(actor, quantity);
     }
+
+    // Notify the sender via a whisper chat message
+    const senderUser = game.users.find(u => u.character?.id === currentActor.id);
+    const whisperIds = [
+        ...game.users.filter(u => u.isGM).map(u => u.id),
+        senderUser?.id
+    ].filter(Boolean);
+
+    ChatMessage.create({
+        content: `${currentActor.name} gave ${offerDescription({ currentItem, quantity })} to ${actor.name}.`,
+        whisper: whisperIds
+    });
+
+    // Notify the sender's client
+    game.socket.emit('module.give-item', {
+        data: { actorName: actor.name },
+        actorId: currentActor.id,
+        currentActorId: actor.id,
+        type: 'npc-complete'
+    });
 }
 
-function receiveItem({currentItem, quantity, actor}) {
-    const duplicatedItem = duplicate(currentItem);
-    if (isNaN(duplicatedItem.system.quantity)) {
-        duplicatedItem.system.quantity.value = quantity;
-    } else {
-        duplicatedItem.system.quantity = quantity;
-    }
-    const existingItem = getItemFromInvoByName(actor, duplicatedItem.name);
-    if (existingItem) {
-        let updatedQuantity, updateItem;
-        if (isNaN(duplicatedItem.system.quantity)) {
-            updatedQuantity = existingItem.system.quantity.value + quantity;
-            updateItem = {
-                "system.quantity.value": updatedQuantity
-            };
-        } else {
-            updatedQuantity = existingItem.system.quantity + quantity;
-            updateItem = {
-                "system.quantity": updatedQuantity
-            };
-        }
-        existingItem.update(updateItem);
-    } else {
-        Item.create(duplicatedItem, {parent: actor});
-    }
-    console.log(`Giving item: ${currentItem.id} to actor ${actor.id}`);
+export function notifyNPCTradeComplete({ currentActor })
+{
+    ui.notifications.info(`Your gift to ${currentActor.name} was received.`);
 }
 
-function receiveCurrency({actor, quantity, alt}) {
-    if (game.system.id === "wfrp4e") {
-        const currentCurrency = actor.items.filter(item => item.type === "money");
-        const currentGC = currentCurrency.find(currency => currency.name === "Gold Crown");
-        const currentSS = currentCurrency.find(currency => currency.name === "Silver Shilling");
-        const currentBP = currentCurrency.find(currency => currency.name === "Brass Penny");
-        const updateGC = {
-            "data.quantity.value": currentGC.system.quantity.value + quantity.gc
-        };
-        currentGC.update(updateGC);
-        const updateSS = {
-            "data.quantity.value": currentSS.system.quantity.value + quantity.ss
-        };
-        currentSS.update(updateSS);
-        const updateBP = {
-            "data.quantity.value": currentBP.system.quantity.value + quantity.bp
-        };
-        currentBP.update(updateBP);
-        console.log(`Giving currency: GC:${quantity.gc}, SS:${quantity.ss}, BP:${quantity.bp}, to actor ${actor.id}`);
-    } else if (game.system.id === "pf2e") {
-        console.log(`Giving currency: pp:${quantity.pp}, gp:${quantity.gp}, sp:${quantity.sp}, cp:${quantity.cp}, to actor ${actor.id}`);
-        actor.inventory.addCoins(quantity);
-    } else {
-        let currentCurrency = actor.system.currency;
-        let updateGold = {};
-        if (alt) {
-            currentCurrency = actor.system.altCurrency;
-            updateGold = {
-                "data.altCurrency.pp": currentCurrency.pp + quantity.pp,
-                "data.altCurrency.gp": currentCurrency.gp + quantity.gp,
-                "data.altCurrency.sp": currentCurrency.sp + quantity.sp,
-                "data.altCurrency.cp": currentCurrency.cp + quantity.cp,
-            };
-        } else {
-            updateGold = {
-                "data.currency.pp": currentCurrency.pp + quantity.pp,
-                "data.currency.gp": currentCurrency.gp + quantity.gp,
-                "data.currency.sp": currentCurrency.sp + quantity.sp,
-                "data.currency.cp": currentCurrency.cp + quantity.cp,
-            };
-        }
-        if (quantity.ep) {
-            updateGold["data.currency.ep"] = currentCurrency.ep + quantity.ep;
-        }
-        console.log(`Giving ${alt ? "Weightless currency: " : ""} currency: pp:${quantity.pp}, gp:${quantity.gp}, ep:${quantity.ep}, sp:${quantity.sp}, cp:${quantity.cp}, to actor ${actor.id}`);
-        actor.update(updateGold);
-    }
-}
-
-function offer(data) {
-    if (!!data.currentItem) {
-        return `${data.quantity} ${data.currentItem.name}`;
-    }
-    if (game.system.id === "wfrp4e") {
-        return `${data.quantity.gc} GC, ${data.quantity.ss} SS, ${data.quantity.bp} BP`;
-    }
-    return `${data.alt ? "Weightless currency: ": ""} ${data.quantity.pp} pp, ${data.quantity.gp} gp, ${data.quantity.ep ? `${data.quantity.ep}  ep, ` : ""}${data.quantity.sp} sp, ${data.quantity.cp} cp`;
-}
-
-function tradeConfirmed(tradeData) {
-    if (!!tradeData.currentItem) { 
+function tradeConfirmed(tradeData)
+{
+    // Add item / currency to the recipient (this runs on the recipient's client)
+    if (tradeData.currentItem)
+    {
         receiveItem(tradeData);
-    } else {
-        receiveCurrency(tradeData)
+    } else
+    {
+        receiveCurrency(tradeData);
     }
-    sendMessageToGM(tradeData);
+
+    sendTradeLog(tradeData);
+
+    // Notify the original sender
     game.socket.emit('module.give-item', {
         data: tradeData,
         actorId: tradeData.currentActor.id,
         currentActorId: tradeData.actor.id,
-        type: "accepted"
+        type: 'accepted'
     });
 }
 
-function tradeDenied(tradeData) {
+function tradeDenied(tradeData)
+{
     game.socket.emit('module.give-item', {
         data: tradeData,
         actorId: tradeData.currentActor.id,
         currentActorId: tradeData.actor.id,
-        type: "denied"
+        type: 'denied'
     });
 }
 
-function sendMessageToGM(tradeData) {
-    let chatMessage = {
-        user: game.userId,
-        speaker: ChatMessage.getSpeaker(),
-        content: `${tradeData.currentActor.name} has sent ${tradeData.actor.name} ${offer(tradeData)}`,
-        whisper: game.users.filter(u => u.isGM).map(u => u._id)
-    };
+function receiveItem({ currentItem, quantity, actor })
+{
+    const itemData = foundry.utils.duplicate(currentItem);
+    itemData.system.quantity = quantity;
 
-    chatMessage.whisper.push(tradeData.currentActor.id);
-
-    ChatMessage.create(chatMessage);
+    const existing = actor.items.find(i => i.name === itemData.name && i.type === itemData.type);
+    if (existing)
+    {
+        existing.update({ 'system.quantity': (existing.system.quantity ?? 0) + quantity });
+    } else
+    {
+        Item.create(itemData, { parent: actor });
+    }
 }
 
-function getItemFromInvoByName(actor, name) {
-  return actor.items.find(t => t.name === name);
+function receiveCurrency({ actor, quantity })
+{
+    transferCurrencyTo(actor, quantity);
+}
+
+// Remove item from the sender (called on sender's client after acceptance)
+function removeSenderItem({ currentItem, quantity, actor })
+{
+    // When called via completeTrade, actor = sender (actorId was swapped on accept)
+    const item = actor.items.get(currentItem._id);
+    if (!item) return;
+    const newQty = (item.system.quantity ?? 0) - quantity;
+    if (newQty <= 0)
+    {
+        item.delete();
+    } else
+    {
+        item.update({ 'system.quantity': newQty });
+    }
+}
+
+function removeSenderCurrency({ actor, quantity })
+{
+    transferCurrencyFrom(actor, quantity);
+}
+
+function transferCurrencyTo(actor, quantity)
+{
+    const cur = actor.system.currency ?? {};
+    return actor.update({
+        'system.currency.pp': (cur.pp ?? 0) + (quantity.pp ?? 0),
+        'system.currency.gp': (cur.gp ?? 0) + (quantity.gp ?? 0),
+        'system.currency.ep': (cur.ep ?? 0) + (quantity.ep ?? 0),
+        'system.currency.sp': (cur.sp ?? 0) + (quantity.sp ?? 0),
+        'system.currency.cp': (cur.cp ?? 0) + (quantity.cp ?? 0)
+    });
+}
+
+function transferCurrencyFrom(actor, quantity)
+{
+    const cur = actor.system.currency ?? {};
+    return actor.update({
+        'system.currency.pp': (cur.pp ?? 0) - (quantity.pp ?? 0),
+        'system.currency.gp': (cur.gp ?? 0) - (quantity.gp ?? 0),
+        'system.currency.ep': (cur.ep ?? 0) - (quantity.ep ?? 0),
+        'system.currency.sp': (cur.sp ?? 0) - (quantity.sp ?? 0),
+        'system.currency.cp': (cur.cp ?? 0) - (quantity.cp ?? 0)
+    });
+}
+
+function offerDescription({ currentItem, quantity })
+{
+    if (currentItem)
+    {
+        return `${quantity}x ${currentItem.name}`;
+    }
+    const parts = [];
+    if (quantity.pp) parts.push(`${quantity.pp} pp`);
+    if (quantity.gp) parts.push(`${quantity.gp} gp`);
+    if (quantity.ep) parts.push(`${quantity.ep} ep`);
+    if (quantity.sp) parts.push(`${quantity.sp} sp`);
+    if (quantity.cp) parts.push(`${quantity.cp} cp`);
+    return parts.join(', ') || '(nothing)';
+}
+
+function sendTradeLog(tradeData)
+{
+    const senderUser = game.users.find(u => u.character?.id === tradeData.currentActor.id);
+    const whisperIds = [
+        ...game.users.filter(u => u.isGM).map(u => u.id),
+        senderUser?.id
+    ].filter(Boolean);
+
+    ChatMessage.create({
+        content: `${tradeData.currentActor.name} gave ${offerDescription(tradeData)} to ${tradeData.actor.name}.`,
+        whisper: whisperIds,
+        speaker: ChatMessage.getSpeaker({ actor: tradeData.actor })
+    });
 }

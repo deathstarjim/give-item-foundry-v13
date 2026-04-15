@@ -1,6 +1,77 @@
-.give-item-dialog.player {
-    flex-basis: 100%;
+/* ── Give Item button (per-item row) ─────────────────────────────────────── */
+.item-give-module {
+    cursor: pointer;
 }
-.give-item-dialog.currency {
-    flex-basis: 20%;
+
+/* ── Give Currency button ────────────────────────────────────────────────── */
+.give-currency-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 4px;
+    cursor: pointer;
+    background: none;
+    border: 1px solid var(--color-border-light-tertiary, #999);
+    border-radius: 3px;
+    font-size: var(--font-size-11, 11px);
+    color: var(--color-text-light-secondary, #666);
+    margin-left: 4px;
+}
+
+.give-currency-btn:hover {
+    color: var(--color-text-light-primary, #333);
+    border-color: var(--color-border-light-secondary, #555);
+}
+
+/* ── Give Item dialog form ───────────────────────────────────────────────── */
+.give-item-form .form-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.give-item-form label {
+    flex: 0 0 auto;
+    font-weight: bold;
+}
+
+.give-item-form select,
+.give-item-form input[type="number"] {
+    flex: 1;
+}
+
+/* Currency row — compact side-by-side layout */
+.give-item-form .currency-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr auto 1fr auto 1fr auto 1fr;
+    gap: 4px;
+    align-items: center;
+}
+
+.give-item-form .currency-row label {
+    font-size: var(--font-size-11, 11px);
+}
+
+.give-item-form .currency-row input {
+    width: 48px;
+    min-width: 0;
+}
+
+/* ── NPC receive-items toggle (GM only) ──────────────────────────────────── */
+.give-item-npc-toggle {
+    background: var(--color-bg-option, rgba(0, 0, 0, 0.05));
+    border: 1px solid var(--color-border-light-tertiary, #ccc);
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    font-size: var(--font-size-12, 12px);
+}
+
+.give-item-npc-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
 }

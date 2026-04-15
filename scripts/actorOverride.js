@@ -1,267 +1,128 @@
-import { PlayerDialog } from "./dialog.js";
+import { showGiveItemDialog, showGiveCurrencyDialog } from './dialog.js';
 
-export function addGiveItemButton(html, actor) {
-  $(`
-    <a class="item-control item-give-module" title="Give item">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find(".inventory ol:not(.currency-list) .item-control[data-action='equip']"));
-  html.find(".item-control.item-give-module").on("click", giveItemHandler.bind(actor));
+// Resolve both raw HTMLElement (ApplicationV2 sheets) and jQuery-wrapped elements.
+function toElement(html)
+{
+  if (typeof jQuery !== 'undefined' && html instanceof jQuery) return html[0];
+  return html instanceof HTMLElement ? html : null;
 }
 
-export function addGiveItemButton5E(html, actor) {
-  $(`
-    <a class="item-control item-give-module give-item" title="Give item">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find(".inventory ol:not(.currency-list) .item-control[data-action='equip']"));
-  html.find(".item-control.item-give-module.give-item").on("click", giveItemHandler.bind(actor));
+// ── Item give buttons ─────────────────────────────────────────────────────────
+
+export function addGiveItemButton(html, actor)
+{
+  const el = toElement(html);
+  if (!el) return;
+
+  // Target inventory-tab items only; skip spells/features.
+  // Both the dnd5e v4 default sheet and Tidy5e use [data-tab="inventory"] or
+  // .tab.inventory to wrap the inventory pane.
+  const inventoryPane =
+    el.querySelector('.tab[data-tab="inventory"]') ??
+    el.querySelector('.tab.inventory') ??
+    el; // fall back to full sheet so nothing is missed
+
+  inventoryPane.querySelectorAll('[data-item-id]').forEach(itemEl =>
+  {
+    const controls = itemEl.querySelector('.item-controls');
+    if (!controls) return;
+    if (controls.querySelector('.item-give-module')) return; // already injected
+
+    const btn = document.createElement('a');
+    btn.className = 'item-control item-give-module';
+    btn.title = 'Give Item';
+    btn.setAttribute('data-tooltip', 'Give Item');
+    btn.innerHTML = '<i class="fas fa-handshake-angle"></i>';
+    btn.addEventListener('click', e =>
+    {
+      e.preventDefault();
+      e.stopPropagation();
+      showGiveItemDialog(actor, itemEl.dataset.itemId);
+    });
+    controls.appendChild(btn);
+  });
 }
 
-export function addGiveItemButtonPF2E(html, actor) {
-  $(`
-    <a class="item-control item-give-module give-item" title="Give item">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find(".inventory .items .item-controls .item-carry-type"));
-  html.find(".item-control.item-give-module.give-item").on("click", giveItemHandlerPF2E.bind(actor));
-}
+// ── Currency give button ──────────────────────────────────────────────────────
 
-function giveItemHandler(e) {
-  e.preventDefault();
-  const currentItemId = e.currentTarget.closest(".item").dataset.itemId;
-  giveItem.bind(this)(currentItemId);
-}
+export function addGiveCurrency(html, actor)
+{
+  const el = toElement(html);
+  if (!el) return;
 
-function giveItemHandlerPF2E(e) {
-  e.preventDefault();
-  const currentItemId = e.currentTarget.closest(".data").parentNode.dataset.itemId;
-  giveItem.bind(this)(currentItemId);
-}
+  const currencySection = el.querySelector('.currency');
+  if (!currencySection) return;
+  if (currencySection.querySelector('.give-currency-btn')) return; // already injected
 
-export function addGiveCurrency(html, actor) {
-  $(`
-    <a class="currency-control currency-give" title="Give currency">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find(".currency-convert.rollable"));
-  html.find(".currency-control.currency-give").on("click", (e) => {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'give-currency-btn';
+  btn.title = 'Give Currency';
+  btn.setAttribute('data-tooltip', 'Give Currency');
+  btn.innerHTML = '<i class="fas fa-handshake-angle"></i>';
+  btn.addEventListener('click', e =>
+  {
     e.preventDefault();
-    giveCurrency.bind(actor)();
+    showGiveCurrencyDialog(actor);
   });
+  currencySection.appendChild(btn);
 }
 
-export function addGiveCurrency5E(html, actor) {
-  $(`
-    <a class="item-control item-give-module give-currency" title="Give item">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find(".inventory .currency .item-action"));
-  html.find(".item-control.item-give-module.give-currency").on("click", giveCurrency5E.bind(actor));
-}
+// ── NPC "allow receive" toggle (GM only) ──────────────────────────────────────
 
-export function addGiveCurrency5E2(html, actor) {
-  $(`
-    <button type="button" title="Give item" class="item-action unbutton item-give-module give-currency" data-action="give-currency" aria-label="Give Currency">
-      <i class="fas fa-hands-helping"></i>
-    </button>
-  `).insertAfter(html.find(".inventory .currency .item-action"));
-  html.find(".item-action.unbutton.item-give-module.give-currency").on("click", giveCurrency5E.bind(actor));
-}
+export function addNPCReceiveToggle(html, actor)
+{
+  const el = toElement(html);
+  if (!el) return;
 
-export function addGiveCurrencyPF1E(html, actor) {
-  $(`
-    <a class="currency-control currency-give main" title="Give currency">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find("ol.currency:nth-of-type(1) h3"));
-  html.find(".currency-control.currency-give.main").on("click", (e) => {
-    e.preventDefault();
-    giveMainCurrencyPF1E.bind(actor)();
+  // Insert near the sheet header — works for both dnd5e v4 and Tidy5e NPC sheets.
+  const header =
+    el.querySelector('.sheet-header') ??
+    el.querySelector('.window-content') ??
+    el;
+
+  if (header.querySelector('.give-item-npc-toggle')) return; // already injected
+
+  const flagged = actor.getFlag('give-item', 'allowReceive') ?? false;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'give-item-npc-toggle form-group';
+  wrapper.innerHTML = `
+    <label class="checkbox">
+      <input type="checkbox" ${flagged ? 'checked' : ''}>
+      Players can give items to this NPC
+    </label>`;
+
+  wrapper.querySelector('input').addEventListener('change', e =>
+  {
+    actor.setFlag('give-item', 'allowReceive', e.target.checked);
   });
-  $(`
-    <a class="currency-control currency-give alt" title="Give currency">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find("ol.currency:nth-of-type(2) h3"));
-  html.find(".currency-control.currency-give.alt").on("click", (e) => {
-    e.preventDefault();
-    giveAltCurrencyPF1E.bind(actor)();
-  });
+
+  header.prepend(wrapper);
 }
 
-export function addGiveCurrencyPF2E(html, actor) {
-  $(`
-    <li>
-      <button type="button" class="item-control item-give-module give-currency" title="Give item">
-        <i class="fas fa-hands-helping"></i>
-      </button>
-    </li>
-  `).insertAfter(html.find(".denomination.cp"));
-  html.find(".item-control.item-give-module.give-currency").on("click", giveMainCurrencyPF2E.bind(actor));
-}
+// ── Recipient list (exported for dialog use) ──────────────────────────────────
 
-export function addGiveCurrencyWFRP4E(html, actor) {
-  $(`
-    <a class="currency-control combat-icon currency-give" title="Give currency">
-      <i class="fas fa-hands-helping"></i>
-    </a>
-  `).insertAfter(html.find("#currency-header .dollar-icon.combat-icon"));
-  html.find(".currency-control.combat-icon.currency-give").on("click", (e) => {
-    e.preventDefault();
-    giveCurrencyWFRP4E.bind(actor)();
-  });
-}
+export function fetchRecipients(currentActor)
+{
+  const recipients = [];
 
-function fetchPCList() {
-  const filteredPCList = [];
-  game.users.players.forEach(player => {
-    if (!!player.character && game.user.character?.id !== player.character.id) {
-      filteredPCList.push(player.character);
+  // Player characters (online players with an assigned character, excluding self)
+  game.users.filter(u => !u.isGM).forEach(user =>
+  {
+    if (user.character && user.character.id !== currentActor.id)
+    {
+      recipients.push({ id: user.character.id, name: user.character.name, type: 'pc' });
     }
   });
-  return filteredPCList;
-}
 
-function giveItem(currentItemId) {
-  const currentActor = this;
-  const filteredPCList = fetchPCList();
-  const d = new PlayerDialog(({playerId, quantity}) => {
-    const actor = game.actors.get(playerId);
-    const currentItem = currentActor.items.find(item => item.id === currentItemId);
-    let currentItemQuantity;
-    if (isNaN(currentItem.system.quantity)) {
-      currentItemQuantity = currentItem.system.quantity.value
-    } else {
-      currentItemQuantity = currentItem.system.quantity
-    }
-    if (quantity > currentItemQuantity) {
-      return ui.notifications.error(`You cannot offer more items than you have`);
-    } else {
-      game.socket.emit('module.give-item', {
-        data: {currentItem, quantity},
-        actorId: actor.id,
-        currentActorId: currentActor.id,
-        type: "request"
-      });
-    }
-  },
-    {acceptLabel: "Offer Item", filteredPCList}
-  );
-  d.render(true);
-}
+  // NPCs flagged by the GM as receivable
+  game.actors
+    .filter(a => a.type === 'npc' && a.getFlag('give-item', 'allowReceive'))
+    .forEach(npc =>
+    {
+      recipients.push({ id: npc.id, name: `${npc.name} (NPC)`, type: 'npc' });
+    });
 
-function giveCurrency5E() {
-  const currentActor = this;
-  const filteredPCList = fetchPCList();
-  const d = new PlayerDialog(({playerId, pp, gp, ep, sp, cp}) => {
-    const actor = game.actors.get(playerId);
-    const currentCurrency = currentActor.system.currency;
-    if (pp > currentCurrency.pp || gp > currentCurrency.gp || ep > currentCurrency.ep || sp > currentCurrency.sp || cp > currentCurrency.cp) {
-      return ui.notifications.error(`You cannot offer more currency than you have`);
-    } else {
-      game.socket.emit('module.give-item', {
-        data: {quantity: {pp, gp, ep, sp, cp}},
-        actorId: actor.id,
-        currentActorId: currentActor.id,
-        type: "request"
-      });
-    }
-  },
-    {acceptLabel: "Offer Currency", filteredPCList, currency: true}
-  );
-  d.render(true);
-}
-
-function giveMainCurrencyPF1E() {
-  const currentActor = this;
-  const filteredPCList = fetchPCList();
-  const d = new PlayerDialog(({playerId, pp, gp, sp, cp}) => {
-    const actor = game.actors.get(playerId);
-    const currentCurrency = currentActor.system.currency;
-    if (pp > currentCurrency.pp || gp > currentCurrency.gp || sp > currentCurrency.sp || cp > currentCurrency.cp) {
-      return ui.notifications.error(`You cannot offer more currency than you have`);
-    } else {
-      game.socket.emit('module.give-item', {
-        data: {quantity: {pp, gp, sp, cp}},
-        actorId: actor.id,
-        currentActorId: currentActor.id,
-        type: "request"
-      });
-    }
-  },
-    {acceptLabel: "Offer Currency", filteredPCList, currency: true}
-  );
-  d.render(true);
-}
-
-function giveMainCurrencyPF2E() {
-  const currentActor = this;
-  const filteredPCList = fetchPCList();
-  const d = new PlayerDialog(({playerId, pp, gp, sp, cp}) => {
-    const actor = game.actors.get(playerId);
-    const currentCurrency = currentActor.inventory.coins;
-    if (pp > currentCurrency.pp || gp > currentCurrency.gp || sp > currentCurrency.sp || cp > currentCurrency.cp) {
-      return ui.notifications.error(`You cannot offer more currency than you have`);
-    } else {
-      game.socket.emit('module.give-item', {
-        data: {quantity: {pp, gp, sp, cp}},
-        actorId: actor.id,
-        currentActorId: currentActor.id,
-        type: "request"
-      });
-    }
-  },
-    {acceptLabel: "Offer Currency", filteredPCList, currency: true}
-  );
-  d.render(true);
-}
-
-
-function giveAltCurrencyPF1E() {
-  const currentActor = this;
-  const filteredPCList = fetchPCList();
-  const d = new PlayerDialog(({playerId, pp, gp, sp, cp}) => {
-    const actor = game.actors.get(playerId);
-    const currentCurrency = currentActor.system.altCurrency;
-    if (pp > currentCurrency.pp || gp > currentCurrency.gp || sp > currentCurrency.sp || cp > currentCurrency.cp) {
-      return ui.notifications.error(`You cannot offer more currency than you have`);
-    } else {
-      game.socket.emit('module.give-item', {
-        data: {quantity: {pp, gp, sp, cp}, alt: true},
-        actorId: actor.id,
-        currentActorId: currentActor.id,
-        type: "request"
-      });
-    }
-  },
-    {acceptLabel: "Offer Currency", filteredPCList, currency: true}
-  );
-  d.render(true);
-}
-
-
-function giveCurrencyWFRP4E() {
-  const currentActor = this;
-  const filteredPCList = fetchPCList();
-  const d = new PlayerDialog(({playerId, gc, ss, bp}) => {
-    const actor = game.actors.get(playerId);
-    const currentCurrency = currentActor.items.filter(item => item.type === "money");
-    const currentGC = currentCurrency.find(currency => currency.name === "Gold Crown");
-    const currentSS = currentCurrency.find(currency => currency.name === "Silver Shilling");
-    const currentBP = currentCurrency.find(currency => currency.name === "Brass Penny");
-    if (gc > currentGC.quantity.value || ss > currentSS.quantity.value || bp > currentBP.quantity.value) {
-      return ui.notifications.error(`You cannot offer more currency than you have`);
-    } else {
-      game.socket.emit('module.give-item', {
-        data: {quantity: {gc, ss, bp}},
-        actorId: actor.id,
-        currentActorId: currentActor.id,
-        type: "request"
-      });
-    }
-  },
-    {acceptLabel: "Offer Currency", filteredPCList, currency: true}
-  );
-  d.render(true);
+  return recipients;
 }

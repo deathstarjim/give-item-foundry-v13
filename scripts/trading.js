@@ -184,25 +184,19 @@ function removeSenderCurrency({ actor, quantity })
 function transferCurrencyTo(actor, quantity)
 {
     const cur = actor.system.currency ?? {};
-    return actor.update({
-        'system.currency.pp': (cur.pp ?? 0) + (quantity.pp ?? 0),
-        'system.currency.gp': (cur.gp ?? 0) + (quantity.gp ?? 0),
-        'system.currency.ep': (cur.ep ?? 0) + (quantity.ep ?? 0),
-        'system.currency.sp': (cur.sp ?? 0) + (quantity.sp ?? 0),
-        'system.currency.cp': (cur.cp ?? 0) + (quantity.cp ?? 0)
-    });
+    const update = Object.fromEntries(
+        Object.keys(quantity).map(k => [`system.currency.${k}`, (cur[k] ?? 0) + (quantity[k] ?? 0)])
+    );
+    return actor.update(update);
 }
 
 function transferCurrencyFrom(actor, quantity)
 {
     const cur = actor.system.currency ?? {};
-    return actor.update({
-        'system.currency.pp': (cur.pp ?? 0) - (quantity.pp ?? 0),
-        'system.currency.gp': (cur.gp ?? 0) - (quantity.gp ?? 0),
-        'system.currency.ep': (cur.ep ?? 0) - (quantity.ep ?? 0),
-        'system.currency.sp': (cur.sp ?? 0) - (quantity.sp ?? 0),
-        'system.currency.cp': (cur.cp ?? 0) - (quantity.cp ?? 0)
-    });
+    const update = Object.fromEntries(
+        Object.keys(quantity).map(k => [`system.currency.${k}`, (cur[k] ?? 0) - (quantity[k] ?? 0)])
+    );
+    return actor.update(update);
 }
 
 function offerDescription({ currentItem, quantity })

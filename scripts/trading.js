@@ -1,32 +1,40 @@
 // -- Incoming trade request (shown to the recipient PC) -----------------
 
-export function receiveTrade(tradeData)
+export async function receiveTrade(tradeData)
 {
-    const dialog = new foundry.applications.api.DialogV2({
+    const result = await foundry.applications.api.DialogV2.wait({
         window: { title: 'Incoming Trade Request' },
         content: `<p>${tradeData.currentActor.name} wants to give you ${offerDescription(tradeData)}. Do you accept?</p>`,
         buttons: [
-            {
-                action: 'accept',
-                label: 'Accept',
-                icon: 'fas fa-check',
-                default: true,
-                callback: () => tradeConfirmed(tradeData)
-            },
-            {
-                action: 'deny',
-                label: 'Deny',
-                icon: 'fas fa-times',
-                callback: () => tradeDenied(tradeData)
-            }
+            { action: 'accept', label: 'Accept', icon: 'fas fa-check', default: true },
+            { action: 'deny', label: 'Deny', icon: 'fas fa-times' }
         ],
         rejectClose: false
     });
 
-    // Only show the dialog to the actual player, never to the GM automatically.
-    if (!game.user.isGM)
+    if (result === 'accept')
     {
-        dialog.render(true);
+        if (tradeData.currentItem) receiveItem(tradeData);
+        else receiveCurrency(tradeData);
+        sendTradeLog(tradeData);
+
+        // Tell the sender's client to remove the item/currency.
+        // Pass only plain data — no live Actor objects in the payload.
+        game.socket.emit('module.give-item', {
+            data: { currentItem: tradeData.currentItem ?? null, quantity: tradeData.quantity },
+            actorId: tradeData.currentActor.id,
+            currentActorId: tradeData.actor.id,
+            type: 'accepted'
+        });
+    }
+    else
+    {
+        game.socket.emit('module.give-item', {
+            data: {},
+            actorId: tradeData.currentActor.id,
+            currentActorId: tradeData.actor.id,
+            type: 'denied'
+        });
     }
 }
 
@@ -106,38 +114,6 @@ export async function completeNPCTrade({ currentItem, quantity, actor, currentAc
 export function notifyNPCTradeComplete({ currentActor })
 {
     ui.notifications.info(`Your gift to ${currentActor.name} was received.`);
-}
-
-function tradeConfirmed(tradeData)
-{
-    // Add item / currency to the recipient (this runs on the recipient's client)
-    if (tradeData.currentItem)
-    {
-        receiveItem(tradeData);
-    } else
-    {
-        receiveCurrency(tradeData);
-    }
-
-    sendTradeLog(tradeData);
-
-    // Notify the original sender
-    game.socket.emit('module.give-item', {
-        data: tradeData,
-        actorId: tradeData.currentActor.id,
-        currentActorId: tradeData.actor.id,
-        type: 'accepted'
-    });
-}
-
-function tradeDenied(tradeData)
-{
-    game.socket.emit('module.give-item', {
-        data: tradeData,
-        actorId: tradeData.currentActor.id,
-        currentActorId: tradeData.actor.id,
-        type: 'denied'
-    });
 }
 
 function receiveItem({ currentItem, quantity, actor })

@@ -13,34 +13,23 @@ Hooks.on('init', function ()
   });
 });
 
-// dnd5e v4 default character sheet (ApplicationV2)
-Hooks.on('renderActorSheet5eCharacter2', (sheet, html) =>
+// renderActorSheetV2 fires for all ApplicationV2-based actor sheets —
+// covers the dnd5e v4 default sheet and Tidy5e with a single hook.
+Hooks.on('renderActorSheetV2', (sheet, html) =>
 {
+  if (sheet.actor?.type !== 'character') return;
   if (!game.settings.get('give-item', 'enabled')) return;
   if (!sheet.actor.isOwner) return;
   addGiveItemButton(html, sheet.actor);
   addGiveCurrency(html, sheet.actor);
 });
 
-// Tidy5e Sheets character sheet
-Hooks.on('renderTidy5eCharacterSheet', (sheet, html) =>
+// NPC sheets — GM can flag NPCs as receivable.
+// renderActorSheetV2 also fires for NPC sheets, so one hook covers both
+// the dnd5e v4 default NPC sheet and Tidy5e NPC sheet.
+Hooks.on('renderActorSheetV2', (sheet, html) =>
 {
-  if (!game.settings.get('give-item', 'enabled')) return;
-  if (!sheet.actor.isOwner) return;
-  addGiveItemButton(html, sheet.actor);
-  addGiveCurrency(html, sheet.actor);
-});
-
-// dnd5e v4 default NPC sheet — GM can flag NPCs as receivable
-Hooks.on('renderActorSheet5eNPC2', (sheet, html) =>
-{
-  if (!game.user.isGM) return;
-  addNPCReceiveToggle(html, sheet.actor);
-});
-
-// Tidy5e NPC sheet
-Hooks.on('renderTidy5eNpcSheet', (sheet, html) =>
-{
+  if (sheet.actor?.type !== 'npc') return;
   if (!game.user.isGM) return;
   addNPCReceiveToggle(html, sheet.actor);
 });
@@ -73,8 +62,8 @@ Hooks.once('setup', function ()
       return;
     }
 
-    // PC-to-PC trade flow
-    if (data.actor?.isOwner)
+    // PC-to-PC trade flow — skip entirely for the GM
+    if (!game.user.isGM && data.actor?.isOwner)
     {
       if (type === 'request') receiveTrade(data);
       if (type === 'accepted') completeTrade(data);

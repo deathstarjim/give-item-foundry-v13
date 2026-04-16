@@ -41,6 +41,40 @@
     flex: 1;
 }
 
+/* Stock note above the recipient list */
+.give-item-stock {
+    margin: 0 0 8px;
+    font-size: var(--font-size-12, 12px);
+    color: var(--color-text-light-secondary, #666);
+}
+
+/* Recipient list — one row per person */
+.give-item-recipient-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.give-item-recipient-row {
+    display: grid;
+    grid-template-columns: 20px 1fr 60px;
+    align-items: center;
+    gap: 6px;
+}
+
+.give-item-recipient-row label {
+    font-weight: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.give-item-qty {
+    width: 60px;
+    min-width: 0;
+    text-align: right;
+}
+
 /* Currency row — compact side-by-side layout */
 .give-item-form .currency-row {
     display: grid;

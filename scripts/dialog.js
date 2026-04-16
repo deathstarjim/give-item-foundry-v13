@@ -15,19 +15,20 @@ export async function showGiveItemDialog(actor, itemId)
     return ui.notifications.warn('No valid recipients found. Make sure other players have characters assigned, or ask your GM to flag an NPC.');
   }
 
-  const options = recipients
-    .map(r => `<option value="${r.id}">${foundry.utils.escapeHTML(r.name)}</option>`)
-    .join('');
+  const maxQty = currentItem.system.quantity ?? 1;
+
+  const rows = recipients.map(r => `
+    <div class="give-item-recipient-row">
+      <input type="checkbox" name="chk_${r.id}" id="chk_${r.id}">
+      <label for="chk_${r.id}">${foundry.utils.escapeHTML(r.name)}</label>
+      <input type="number" name="qty_${r.id}" value="1" min="1" max="${maxQty}" class="give-item-qty">
+    </div>`).join('');
 
   const content = `
     <form class="give-item-form">
-      <div class="form-group">
-        <label>Recipient</label>
-        <select name="recipient">${options}</select>
-      </div>
-      <div class="form-group">
-        <label>Quantity</label>
-        <input type="number" name="quantity" value="1" min="1" max="${currentItem.system.quantity ?? 1}">
+      <p class="give-item-stock">You have <strong>${maxQty}</strong> × ${foundry.utils.escapeHTML(currentItem.name)}.</p>
+      <div class="give-item-recipient-list">
+        ${rows}
       </div>
     </form>`;
 
@@ -42,7 +43,12 @@ export async function showGiveItemDialog(actor, itemId)
         default: true,
         callback: (_event, _button, dialog) =>
         {
-          return new FormDataExtended(dialog.querySelector('form')).object;
+          const fd = new foundry.applications.ux.FormDataExtended(dialog.element.querySelector('form')).object;
+          // Collect checked recipients and their quantities
+          return recipients
+            .filter(r => fd[`chk_${r.id}`])
+            .map(r => ({ recipient: r, qty: Math.floor(Number(fd[`qty_${r.id}`])) }))
+            .filter(({ qty }) => Number.isInteger(qty) && qty >= 1);
         }
       },
       { action: 'cancel', label: 'Cancel', icon: 'fas fa-times' }
@@ -52,35 +58,36 @@ export async function showGiveItemDialog(actor, itemId)
 
   if (!result || result === 'cancel') return;
 
-  const { recipient, quantity } = result;
-  const qty = Math.floor(Number(quantity));
+  const offers = result; // array of { recipient, qty }
 
-  if (!Number.isInteger(qty) || qty < 1)
+  if (offers.length === 0)
   {
-    return ui.notifications.error('Invalid quantity.');
+    return ui.notifications.warn('No recipients selected.');
   }
 
-  const currentQuantity = currentItem.system.quantity ?? 0;
-  if (qty > currentQuantity)
+  const totalOffered = offers.reduce((sum, o) => sum + o.qty, 0);
+  if (totalOffered > maxQty)
   {
-    return ui.notifications.error('You cannot offer more items than you have.');
+    return ui.notifications.error(`You only have ${maxQty} × ${currentItem.name} but tried to offer ${totalOffered} total.`);
   }
 
-  const recipientActor = game.actors.get(recipient);
-  if (!recipientActor) return;
-
-  const isNPC = recipientActor.type !== 'character';
-
-  game.socket.emit('module.give-item', {
-    data: { currentItem: currentItem.toObject(), quantity: qty },
-    actorId: recipient,
-    currentActorId: actor.id,
-    type: isNPC ? 'npc-request' : 'request'
-  });
-
-  if (isNPC)
+  for (const { recipient, qty } of offers)
   {
-    ui.notifications.info(`Offering ${qty}x ${currentItem.name} to ${recipientActor.name}…`);
+    const recipientActor = game.actors.get(recipient.id);
+    if (!recipientActor) continue;
+
+    const isNPC = recipientActor.type !== 'character';
+    game.socket.emit('module.give-item', {
+      data: { currentItem: currentItem.toObject(), quantity: qty },
+      actorId: recipient.id,
+      currentActorId: actor.id,
+      type: isNPC ? 'npc-request' : 'request'
+    });
+
+    if (isNPC)
+    {
+      ui.notifications.info(`Offering ${qty}× ${currentItem.name} to ${recipientActor.name}…`);
+    }
   }
 }
 
@@ -131,7 +138,7 @@ export async function showGiveCurrencyDialog(actor)
         default: true,
         callback: (_event, _button, dialog) =>
         {
-          return new FormDataExtended(dialog.querySelector('form')).object;
+          return new foundry.applications.ux.FormDataExtended(dialog.element.querySelector('form')).object;
         }
       },
       { action: 'cancel', label: 'Cancel', icon: 'fas fa-times' }

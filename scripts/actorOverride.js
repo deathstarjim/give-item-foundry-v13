@@ -9,27 +9,38 @@ function toElement(html)
 
 // ── Item give buttons ─────────────────────────────────────────────────────────
 
+// Physical item types we want to show the give button on.
+const PHYSICAL_TYPES = new Set(['weapon', 'equipment', 'consumable', 'tool', 'loot', 'container', 'backpack']);
+
 export function addGiveItemButton(html, actor)
 {
   const el = toElement(html);
   if (!el) return;
 
-  // Target inventory-tab items only; skip spells/features.
-  // Both the dnd5e v4 default sheet and Tidy5e use [data-tab="inventory"] or
-  // .tab.inventory to wrap the inventory pane.
   const inventoryPane =
-    el.querySelector('.tab[data-tab="inventory"]') ??
+    el.querySelector('[data-tab="inventory"]') ??
     el.querySelector('.tab.inventory') ??
-    el; // fall back to full sheet so nothing is missed
+    el;
 
   inventoryPane.querySelectorAll('[data-item-id]').forEach(itemEl =>
   {
-    const controls = itemEl.querySelector('.item-controls');
-    if (!controls) return;
-    if (controls.querySelector('.item-give-module')) return; // already injected
+    const itemId = itemEl.dataset.itemId;
+    const item = actor.items.get(itemId);
+    if (!item || !PHYSICAL_TYPES.has(item.type)) return;
+
+    // dnd5e v4 default sheet uses [data-column-id="controls"]
+    // Tidy5e uses [data-tidy-column-key="actions"] or .tidy-table-actions
+    const controlsCell =
+      itemEl.querySelector('[data-column-id="controls"]') ??
+      itemEl.querySelector('[data-tidy-column-key="actions"]') ??
+      itemEl.querySelector('.tidy-table-actions') ??
+      itemEl.querySelector('.item-controls');
+
+    if (!controlsCell) return;
+    if (controlsCell.querySelector('.item-give-module')) return; // already injected
 
     const btn = document.createElement('a');
-    btn.className = 'item-control item-give-module';
+    btn.className = 'item-control item-give-module item-action unbutton';
     btn.title = 'Give Item';
     btn.setAttribute('data-tooltip', 'Give Item');
     btn.innerHTML = '<i class="fas fa-handshake-angle"></i>';
@@ -37,9 +48,15 @@ export function addGiveItemButton(html, actor)
     {
       e.preventDefault();
       e.stopPropagation();
-      showGiveItemDialog(actor, itemEl.dataset.itemId);
+      showGiveItemDialog(actor, itemId);
     });
-    controls.appendChild(btn);
+
+    // Insert before the context-menu button if present, otherwise append.
+    const contextMenuBtn = controlsCell.querySelector('[data-context-menu]');
+    if (contextMenuBtn)
+      controlsCell.insertBefore(btn, contextMenuBtn);
+    else
+      controlsCell.appendChild(btn);
   });
 }
 
@@ -107,22 +124,17 @@ export function fetchRecipients(currentActor)
 {
   const recipients = [];
 
-  // Player characters (online players with an assigned character, excluding self)
-  game.users.filter(u => !u.isGM).forEach(user =>
-  {
-    if (user.character && user.character.id !== currentActor.id)
-    {
-      recipients.push({ id: user.character.id, name: user.character.name, type: 'pc' });
-    }
-  });
+  // Characters assigned to a user account (excluding self).
+  // Using user.character means only "real" PCs appear — not random
+  // character-type monsters or unassigned actors.
+  game.users
+    .filter(u => !u.isGM && u.character && u.character.id !== currentActor.id)
+    .forEach(u => recipients.push({ id: u.character.id, name: u.character.name, type: 'pc' }));
 
   // NPCs flagged by the GM as receivable
   game.actors
     .filter(a => a.type === 'npc' && a.getFlag('give-item', 'allowReceive'))
-    .forEach(npc =>
-    {
-      recipients.push({ id: npc.id, name: `${npc.name} (NPC)`, type: 'npc' });
-    });
+    .forEach(npc => recipients.push({ id: npc.id, name: `${npc.name} (NPC)`, type: 'npc' }));
 
   return recipients;
 }
